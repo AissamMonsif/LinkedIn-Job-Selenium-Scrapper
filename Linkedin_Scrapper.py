@@ -1,187 +1,190 @@
-# Import necessary packages for web scraping and logging
-import logging
+# -*- coding: utf-8 -*-
+import os, csv, time, random, hashlib, argparse, logging, re, unicodedata
+from datetime import datetime, timezone
+from pathlib import Path
+
+import requests
+from bs4 import BeautifulSoup
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
-import pandas as pd
-import random
-import time
 
-# Configure logging settings
 logging.basicConfig(filename="scraping.log", level=logging.INFO)
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")  # optionnel
 
+# ---------- Utils ----------
+def slugify(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", s.strip().lower())
+    return re.sub(r"-{2,}", "-", s).strip("-")
 
-def scrape_linkedin_jobs(job_title: str, location: str, pages: int = None) -> list:
-    """
-    Scrape job listings from LinkedIn based on job title and location.
+def build_csv_path(job: str, location: str, base_dir="out") -> str:
+    Path(base_dir).mkdir(parents=True, exist_ok=True)
+    return str(Path(base_dir) / f"jobs_{slugify(job)}_{slugify(location)}.csv")
 
-    Parameters
-    ----------
-    job_title : str
-        The job title to search for on LinkedIn.
-    location : str
-        The location to search for jobs in on LinkedIn.
-    pages : int, optional
-        The number of pages of job listings to scrape. If None, all available pages will be scraped.
+def get_job_id_from_link(link: str) -> str | None:
+    # Essaie d'extraire l'ID LinkedIn s'il est présent
+    m = re.search(r"/jobs/view/(\d+)", link)
+    if m: return m.group(1)
+    m = re.search(r"currentJobId=(\d+)", link)
+    if m: return m.group(1)
+    return None
 
-    Returns
-    -------
-    list of dict
-        A list of dictionaries, where each dictionary represents a job listing
-        with the following keys: 'job_title', 'company_name', 'location', 'posted_date',
-        and 'job_description'.
-    """
+def make_id(title, company, location, keyword, link):
+    jid = get_job_id_from_link(link)
+    if jid:  # si on a un ID LinkedIn, c'est la meilleure clé
+        return jid
+    raw = f"{title}|{company}|{location}|{keyword}".encode("utf-8", "ignore")
+    return hashlib.sha256(raw).hexdigest()[:16]
 
-    # Log a message indicating that we're starting a LinkedIn job search
-    logging.info(f'Starting LinkedIn job scrape for "{job_title}" in "{location}"...')
+def load_existing_ids(csv_path):
+    ids = set()
+    if Path(csv_path).exists():
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            r = csv.DictReader(f)
+            for row in r:
+                ids.add(row.get("id_hash",""))
+    return ids
 
-    # Sets the pages to scrape if not provided
-    pages = pages or 1
+def append_rows(csv_path, rows):
+    exists = Path(csv_path).exists()
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=[
+            "id_hash","title","company","location","link",
+            "posted_at_utc","collected_at_utc","source","keyword"
+        ])
+        if not exists:
+            w.writeheader()
+        for r in rows:
+            w.writerow(r)
 
-    # Set up the Selenium web driver
-    driver = webdriver.Chrome("chromedriver.exe")
-
-    # Set up Chrome options to maximize the window
-    options = webdriver.ChromeOptions()
-    options.add_argument("--start-maximized")
-
-    # Initialize the web driver with the Chrome options
-    driver = webdriver.Chrome(options=options)
-
-    # Navigate to the LinkedIn job search page with the given job title and location
-    driver.get(
-        f"https://www.linkedin.com/jobs/search/?keywords={job_title}&location={location}"
-    )
-
-    # Scroll through the first 50 pages of search results on LinkedIn
-    for i in range(pages):
-
-        # Log the current page number
-        logging.info(f"Scrolling to bottom of page {i+1}...")
-
-        # Scroll to the bottom of the page using JavaScript
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-
-        try:
-            # Wait for the "Show more" button to be present on the page
-            element = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located(
-                    (By.XPATH, "/html/body/div[1]/div/main/section[2]/button")
-                )
-            )
-            # Click on the "Show more" button
-            element.click()
-
-        # Handle any exception that may occur when locating or clicking on the button
-        except Exception:
-            # Log a message indicating that the button was not found and we're retrying
-            logging.info("Show more button not found, retrying...")
-
-        # Wait for a random amount of time before scrolling to the next page
-        time.sleep(random.choice(list(range(3, 7))))
-
-    # Scrape the job postings
-    jobs = []
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    job_listings = soup.find_all(
-        "div",
-        class_="base-card relative w-full hover:no-underline focus:no-underline base-card--link base-search-card base-search-card--link job-search-card",
-    )
-
+def slack_notify(rows, keyword):
+    if not SLACK_WEBHOOK or not rows: return
+    lines = [f"• <{r['link']}|{r['title']}> — {r['company']} ({r['location']})" for r in rows[:10]]
+    text = f"🎯 *{keyword}* — {len(rows)} new jobs\n" + "\n".join(lines)
     try:
-        for job in job_listings:
-            # Extract job details
-
-            # job title
-            job_title = job.find("h3", class_="base-search-card__title").text.strip()
-            # job company
-            job_company = job.find(
-                "h4", class_="base-search-card__subtitle"
-            ).text.strip()
-            # job location
-            job_location = job.find(
-                "span", class_="job-search-card__location"
-            ).text.strip()
-            # job link
-            apply_link = job.find("a", class_="base-card__full-link")["href"]
-
-            # Navigate to the job posting page and scrape the description
-            driver.get(apply_link)
-
-            # Sleeping randomly
-            time.sleep(random.choice(list(range(5, 11))))
-
-            # Use try-except block to handle exceptions when retrieving job description
-            try:
-                # Create a BeautifulSoup object from the webpage source
-                description_soup = BeautifulSoup(driver.page_source, "html.parser")
-
-                # Find the job description element and extract its text
-                job_description = description_soup.find(
-                    "div", class_="description__text description__text--rich"
-                ).text.strip()
-
-            # Handle the AttributeError exception that may occur if the element is not found
-            except AttributeError:
-                # Assign None to the job_description variable to indicate that no description was found
-                job_description = None
-
-                # Write a warning message to the log file
-                logging.warning(
-                    "AttributeError occurred while retrieving job description."
-                )
-
-            # Add job details to the jobs list
-            jobs.append(
-                {
-                    "title": job_title,
-                    "company": job_company,
-                    "location": job_location,
-                    "link": apply_link,
-                    "description": job_description,
-                }
-            )
-            # Logging scrapped job with company and location information
-            logging.info(f'Scraped "{job_title}" at {job_company} in {job_location}...')
-
-    # Catching any exception that occurs in the scrapping process
+        requests.post(SLACK_WEBHOOK, json={"text": text}, timeout=10)
     except Exception as e:
-        # Log an error message with the exception details
-        logging.error(f"An error occurred while scraping jobs: {str(e)}")
+        logging.warning(f"Slack error: {e}")
 
-        # Return the jobs list that has been collected so far
-        # This ensures that even if the scraping process is interrupted due to an error, we still have some data
-        return jobs
+# ---------- Driver ----------
+def make_driver(headless=True):
+    opts = Options()
+    if headless:
+        opts.add_argument("--headless=new")
+    opts.add_argument("--window-size=1366,900")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--lang=fr-FR")
+    opts.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+    return webdriver.Chrome(options=opts)  # Selenium Manager -> pas de chromedriver manuel
 
-    # Close the Selenium web driver
-    driver.quit()
+# ---------- Core ----------
+def build_search_url(job_title, location, past_hours=24, page=0, easy_apply=False):
+    from urllib.parse import urlencode
+    base = "https://www.linkedin.com/jobs/search/"
+    params = {
+        "keywords": job_title,
+        "location": location,
+        "origin": "JOB_SEARCH_PAGE_SEARCH_BUTTON",
+        "refresh": "true",
+        "f_TPR": f"r{past_hours*3600}",  # annonces publiées dans les X dernières heures
+    }
+    if easy_apply:
+        params["f_AL"] = "true"
+    if page > 0:
+        params["start"] = str(page*25)
+    return base + "?" + urlencode(params)
 
-    # Return the jobs list
-    return jobs
+def scrape_linkedin_jobs(job_title, location, pages=1, past_hours=24, easy_apply=False):
+    logging.info(f'Start scrape: "{job_title}" @ "{location}"')
+    drv = make_driver(headless=True)
+    collected = []
+    try:
+        for p in range(max(1, pages)):
+            url = build_search_url(job_title, location, past_hours, p, easy_apply)
+            drv.get(url)
 
+            try:
+                WebDriverWait(drv, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "ul.jobs-search__results-list, div.base-card"))
+                )
+            except Exception:
+                logging.info("Results list not found (maybe login wall) → skip page")
+                continue
 
-def save_job_data(data: dict) -> None:
-    """
-    Save job data to a CSV file.
+            # petit scroll pour charger les cartes
+            last_h = 0
+            for _ in range(4):
+                drv.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(random.uniform(0.8, 1.6))
+                h = drv.execute_script("return document.body.scrollHeight")
+                if h == last_h: break
+                last_h = h
 
-    Args:
-        data: A dictionary containing job data.
+            html = drv.page_source
+            soup = BeautifulSoup(html, "lxml")
+            cards = soup.select("ul.jobs-search__results-list li") or soup.select("div.base-card")
+            now = datetime.now(timezone.utc).isoformat()
 
-    Returns:
-        None
-    """
+            for c in cards:
+                t = c.select_one("h3.base-search-card__title") or c.select_one("h3")
+                comp = c.select_one("h4.base-search-card__subtitle") or c.select_one("h4")
+                loc = c.select_one("span.job-search-card__location")
+                link_el = c.select_one("a.base-card__full-link") or c.select_one("a")
 
-    # Create a pandas DataFrame from the job data dictionary
-    df = pd.DataFrame(data)
+                title = t.get_text(strip=True) if t else None
+                company = comp.get_text(strip=True) if comp else ""
+                location_txt = loc.get_text(strip=True) if loc else ""
+                link = link_el["href"].split("?")[0] if link_el and link_el.has_attr("href") else ""
+                if not title or not link: continue
 
-    # Save the DataFrame to a CSV file without including the index column
-    df.to_csv("jobs.csv", index=False)
+                time_el = c.select_one("time")
+                posted_iso = time_el["datetime"] if time_el and time_el.has_attr("datetime") else now
 
-    # Log a message indicating how many jobs were successfully scraped and saved to the CSV file
-    logging.info(f"Successfully scraped {len(data)} jobs and saved to jobs.csv")
+                collected.append({
+                    "id_hash": make_id(title, company, location_txt, job_title, link),
+                    "title": title,
+                    "company": company,
+                    "location": location_txt,
+                    "link": link,
+                    "posted_at_utc": posted_iso,
+                    "collected_at_utc": now,
+                    "source": "LinkedIn",
+                    "keyword": job_title
+                })
 
+            time.sleep(random.uniform(1.0, 2.0))
+    finally:
+        drv.quit()
+    logging.info(f"Scraped {len(collected)} rows.")
+    return collected
 
-data = scrape_linkedin_jobs("Data analyst", "US")
-save_job_data(data)
+# ---------- CLI ----------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--job", default="Développeur Java")
+    ap.add_argument("--location", default="Paris")
+    ap.add_argument("--pages", type=int, default=1)
+    ap.add_argument("--past_hours", type=int, default=24)
+    ap.add_argument("--csv", default=None, help="Chemin CSV (sinon auto par job+location)")
+    args = ap.parse_args()
+
+    csv_path = args.csv or build_csv_path(args.job, args.location)
+    Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
+
+    existing = load_existing_ids(csv_path)
+    rows = scrape_linkedin_jobs(args.job, args.location, args.pages, args.past_hours, easy_apply=False)
+    new_rows = [r for r in rows if r["id_hash"] not in existing]
+
+    if new_rows:
+        append_rows(csv_path, new_rows)
+        logging.info(f"Added {len(new_rows)} new rows → {csv_path}")
+        slack_notify(new_rows, args.job)
+    else:
+        logging.info(f"No new rows for {args.job} @ {args.location} (CSV: {csv_path})")
+
+if __name__ == "__main__":
+    main()

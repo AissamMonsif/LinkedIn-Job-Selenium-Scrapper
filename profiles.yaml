@@ -1,0 +1,35 @@
+profiles:
+  - job: "Développeur Java Angular"
+    location: "Paris, Île-de-France, France"
+    pages: 1
+    past_hours: 24
+
+  - job: "Développeur Java React"
+    location: "Casablanca, Maroc"
+    pages: 1
+    past_hours: 168
+
+  - job: "Développeur Java Angular"
+    location: "Casablanca, Maroc"
+    pages: 1
+    past_hours: 168
+
+  - job: "Testeur logiciel"
+    location: "Casablanca, Maroc"
+    pages: 1
+    past_hours: 168
+
+  - job: "QA Automaticien"
+    location: "Casablanca, Maroc"
+    pages: 1
+    past_hours: 168
+
+  - job: "DevOps"
+    location: "Casablanca, Maroc"
+    pages: 1
+    past_hours: 2000
+
+  - job: "QA Automaticien"
+    location: "Paris, Île-de-France, France"
+    pages: 1
+    past_hours: 24
