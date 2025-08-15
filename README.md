@@ -1,68 +1,107 @@
-# LinkedIn Job Scraper
-This Python script allows you to scrape job listings from LinkedIn based on a job title and location. It uses the Selenium web driver and BeautifulSoup to scrape the job postings and store the results in a list of dictionaries, where each dictionary represents a job listing with the following keys: 'title', 'company', 'location', 'link', and 'description'.
+Jobs Radar – LinkedIn Job Scraper (CSV par recherche)
 
-# Prerequisites
-Before using this script, you need to install the following Python packages:
+Outil Python pour chercher des offres LinkedIn par mot-clé et localisation, puis les ajouter dans un CSV dédié à chaque recherche.
+Aux relances, le script déduplique et n’ajoute que les nouvelles offres.
 
-- Selenium
-- BeautifulSoup
-- Pandas
+⚠️ Note : le scraping de LinkedIn peut contrevenir à ses CGU et être limité/bloqué. Utilisez une fréquence faible (3–4 runs/jour), des pauses, et prévoyez un fallback légal (RSS Indeed / Welcome to the Jungle).
 
-You also need to download the Chrome web driver from the following link:
+✨ Fonctionnalités
 
-https://sites.google.com/a/chromium.org/chromedriver/downloads
+CSV par recherche : ex. Développeur Java @ Paris → out/jobs_developpeur-java_paris-ile-de-france-france.csv.
 
-> Make sure to choose the appropriate version for your operating system and Chrome browser.
+Déduplication : identifiant basé sur l’ID LinkedIn (si présent) sinon hash titre|entreprise|ville|mot-clé.
 
-# Usage
-To use this script, you need to provide the following arguments:
+Fenêtre temporelle : filtre par date de publication (--past_hours : 24h / 7j / 30j / 0 = pas de filtre).
 
-job_title: the job title to search for on LinkedIn
+Multi-profils : exécute plusieurs recherches en série via profiles.yaml.
 
-location: the location to search for jobs in on LinkedIn
+🗂️ Structure
+LinkedIn-Job-Selenium-Scrapper/
+├─ Linkedin_Scrapper.py     # scraper CLI (arguments : --job, --location, …)
+├─ run_profiles.py          # exécute toutes les recherches listées dans profiles.yaml
+├─ profiles.yaml            # configuration des recherches (job/location/pages/past_hours)
+├─ out/                     # CSV générés (1 fichier par recherche)
+└─ scraping.log             # logs (debug)
+
+✅ Prérequis
+
+macOS / Linux / Windows
+
+Python 3.10+
+
+Google Chrome installé (Selenium Manager gère automatiquement le driver)
+
+🚀 Installation
+# 1) cloner le repo
+git clone https://github.com/<votre-user>/<votre-repo>.git
+cd <votre-repo>
+
+# 2) environnement Python (recommandé)
+python3 -m venv .venv
+# macOS/Linux
+source .venv/bin/activate
+# Windows (PowerShell)
+# .\.venv\Scripts\Activate.ps1
+
+# 3) mise à jour pip
+python -m pip install --upgrade pip
+
+# 4) dépendances
+pip install "selenium>=4.21,<5" beautifulsoup4==4.12.3 requests==2.32.3 pyyaml==6.0.2 lxml==5.2.2
+
+⚙️ Configuration
+
+Créer (ou éditer) profiles.yaml à la racine :
+
+profiles:
+  - job: "Développeur Java Angular"
+    location: "Paris, Île-de-France, France"
+    pages: 1
+    past_hours: 24
+
+  - job: "DevOps"
+    location: "Casablanca, Maroc"
+    pages: 1
+    past_hours: 168
+
+  - job: "QA Automaticien"
+    location: "Casablanca, Maroc"
+    pages: 1
+    past_hours: 168
 
 
-pages: the number of pages of job listings to scrape (optional, default is 1)
+job : mots-clés (FR/EN OK).
 
-### Here's an example of how to use the script:
+location : utilisez un libellé reconnu par LinkedIn (ex. Paris, Île-de-France, France).
 
-```python
-job_title = "data scientist"
-location = "New York City"
-pages = 3
+pages : 1 page ≈ 25 résultats (commencez à 1).
 
-jobs = scrape_linkedin_jobs(job_title, location, pages)
-```
+past_hours : 24 = 1 jour ; 168 = 7 jours ; 0 = pas de filtre de date.
 
-This will scrape the first 3 pages of job listings for "data scientist" jobs in "New York City" and store the results in a list of dictionaries called "jobs".
+▶️ Utilisation
+1) Une seule recherche (CLI)
+# venv activé
+python Linkedin_Scrapper.py \
+  --job "Développeur Java" \
+  --location "Paris, Île-de-France, France" \
+  --pages 1 \
+  --past_hours 24
 
-# Output
-The output of this script is a list of dictionaries, where each dictionary represents a job listing with the following keys:
 
-| Field        | Description                                      |
-|--------------|--------------------------------------------------|
-| title        | the job title                                    |
-| company      | the name of the company offering the job         |
-| location     | the location of the job                          |
-| link         | the URL to apply for the job                      |
-| description  | the description of the job (if available)         |
+Résultat :
 
-# Run Tests
-The project has a test_linked_scraper.py file that uses pytest to test the code. To run the tests, you need to install pytest using pip. Here are the steps:
+crée/ajoute dans out/jobs_developpeur-java_paris-ile-de-france-france.csv ;
 
-1. Open a command prompt or terminal window.
-2. Change the directory to the location of the project.
-3. Install pytest by running the following command:
+append et déduplication (n’ajoute que les nouvelles offres).
 
-```bash
-pip install pytest
-```
+Options utiles :
 
-4. Run the tests by running the following command:
+--past_hours 0 → pas de filtre de date ;
 
-```bash
-pytest test_linked_scraper.py
-```
+--csv out/mon_fichier.csv → forcer le nom du CSV de sortie.
 
-This will run all the tests in the test_linked_scraper.py file and display the results in the command prompt or terminal window.
+2) Plusieurs recherches (batch)
+python run_profiles.py
 
+
+Exécute chaque profil défini dans profiles.yaml et met à jour 1 CSV par profil dans out/.
