@@ -1,6 +1,6 @@
-# run_profiles.py
-import subprocess, shlex, unicodedata, re, os, yaml, sys
+import unicodedata, re, os, yaml, sys
 from pathlib import Path
+from linkedin_scraper.cli import run_search
 
 def slugify(s):
     s = unicodedata.normalize("NFKD", s).encode("ascii","ignore").decode("ascii")
@@ -11,7 +11,6 @@ def slugify(s):
 def main():
     base_dir = Path(__file__).resolve().parent
     profiles_path = base_dir / "profiles.yaml"
-    scraper_path = base_dir / "Linkedin_Scrapper.py"
     out_dir = base_dir / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -44,20 +43,16 @@ def main():
             print("⚠️ Profil ignoré (job/location manquants) :", p); continue
 
         csv = out_dir / f"jobs_{slugify(job)}_{slugify(loc)}.csv"
-        cmd = [
-            sys.executable, str(scraper_path),
-            "--job", job,
-            "--location", loc,
-            "--pages", pages,
-            "--past_hours", past,
-            "--csv", str(csv)
-        ]
-        print("▶", " ".join(shlex.quote(c) for c in cmd))
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            print("❌ Error:\n", r.stderr or r.stdout, file=sys.stderr)
+        print("▶", f"{job} @ {loc} pages={pages} past_hours={past}")
+        try:
+            rc = run_search(job=job, location=loc, pages=int(pages), past_hours=int(past), csv_path=str(csv))
+        except Exception as e:
+            print("❌ Error:", e, file=sys.stderr)
         else:
-            print("✅ Done")
+            if rc == 0:
+                print("✅ Done")
+            else:
+                print("⚠️ Finished with non-zero code", rc)
 
 if __name__ == "__main__":
     main()

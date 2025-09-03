@@ -17,8 +17,14 @@ Multi-profils : exécute plusieurs recherches en série via profiles.yaml.
 
 🗂️ Structure
 LinkedIn-Job-Selenium-Scrapper/
-├─ Linkedin_Scrapper.py     # scraper CLI (arguments : --job, --location, …)
-├─ run_profiles.py          # exécute toutes les recherches listées dans profiles.yaml
+├─ linkedin_scraper/        # package Python (core/utils/driver/cli)
+│  ├─ core.py               # logique scraping et URL
+│  ├─ utils.py              # helpers (slugify, CSV path, ids)
+│  ├─ driver.py             # configuration Selenium
+│  ├─ io.py                 # notifications (Slack)
+│  └─ cli.py                # CLI et orchestration
+├─ Linkedin_Scrapper.py     # wrapper legacy vers la nouvelle CLI
+├─ run_profiles.py          # exécute toutes les recherches listées dans profiles.yaml (importe l'API)
 ├─ profiles.yaml            # configuration des recherches (job/location/pages/past_hours)
 ├─ out/                     # CSV générés (1 fichier par recherche)
 └─ scraping.log             # logs (debug)
@@ -105,3 +111,16 @@ python run_profiles.py
 
 
 Exécute chaque profil défini dans profiles.yaml et met à jour 1 CSV par profil dans out/.
+
+🧑‍💻 Développement
+
+- Lancer le scraper via l'API Python:
+  
+  from linkedin_scraper import run_search
+  run_search(job="DevOps", location="Paris", pages=1, past_hours=24)
+
+- Tests unitaires rapides:
+  
+  pytest -q
+
+- Style (recommandé): ruff + black. Un pyproject.toml avec la config est fourni.
